@@ -13,6 +13,7 @@ TODO
 
 REVISION HISTORY
 
+v0.2 (2024-01-14) - Exclude havUtils functions from the one definition rule.
 v0.1 (2024-01-10) - First release.
 
 LICENSE
@@ -142,7 +143,7 @@ namespace havINI {
             return sv.size() >= suffix.size() && sv.compare(sv.size() - suffix.size(), suffix.size(), suffix) == 0;
         }
 
-        std::vector<std::string> Split(const std::string& value, const std::string& delimiter)
+        inline std::vector<std::string> Split(const std::string& value, const std::string& delimiter)
         {
             std::vector<std::string> result;
 
@@ -163,7 +164,7 @@ namespace havINI {
             return result;
         }
 
-        std::string Join(const std::vector<std::string>& strings, const std::string& delimiter)
+        inline std::string Join(const std::vector<std::string>& strings, const std::string& delimiter)
         {
             if (strings.empty() == true)
             {
@@ -180,7 +181,7 @@ namespace havINI {
             return result;
         }
 
-        std::string ToLower(std::string value, const std::locale& loc)
+        inline std::string ToLower(std::string value, const std::locale& loc)
         {
             auto toLower = std::binder1st(std::mem_fun(&std::ctype<char>::tolower), &std::use_facet<std::ctype<char>>(loc));
             std::transform(value.begin(), value.end(), value.begin(), toLower);
