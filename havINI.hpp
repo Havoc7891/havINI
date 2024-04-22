@@ -13,6 +13,7 @@ TODO
 
 REVISION HISTORY
 
+v0.3 (2024-04-22) - Fixed a small bug which would result into undefined behavior and did some performance optimization.
 v0.2 (2024-01-14) - Exclude havUtils functions from the one definition rule.
 v0.1 (2024-01-10) - First release.
 
@@ -2257,7 +2258,7 @@ namespace havINI {
                                 }
 
                                 // Remove potential space character
-                                if (sectionInlineComment.front() == ' ')
+                                if (sectionInlineComment.empty() == false && sectionInlineComment.front() == ' ')
                                 {
                                     sectionInlineComment.erase(sectionInlineComment.begin());
                                 }
@@ -3479,7 +3480,7 @@ namespace havINI {
             mLocale = value;
         }
 
-        std::string GetNewline() const { return mNewline; }
+        const std::string& GetNewline() const { return mNewline; }
         char GetCommentCharacter() const { return mCommentCharacter; }
         char GetValueQuoteCharacter() const { return mValueQuoteCharacter; }
         char GetKeyValuePairDelimiter() const { return mKeyValuePairDelimiter; }
