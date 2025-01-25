@@ -13,6 +13,7 @@ TODO
 
 REVISION HISTORY
 
+v0.4 (2025-01-25) - Fixed the ToLower function by replacing deprecated and removed utility functions with a modern lambda-based implementation. Removed unnecessary header includes to streamline dependencies.
 v0.3 (2024-04-22) - Fixed a small bug which would result into undefined behavior and did some performance optimization.
 v0.2 (2024-01-14) - Exclude havUtils functions from the one definition rule.
 v0.1 (2024-01-10) - First release.
@@ -21,7 +22,7 @@ LICENSE
 
 MIT License
 
-Copyright (c) 2024 René Nicolaus
+Copyright (c) 2024-2025 René Nicolaus
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -80,7 +81,6 @@ SOFTWARE.
 #include <cstdint>
 #include <cuchar>
 #include <cstring>
-#include <codecvt>
 #include <iostream>
 #include <iomanip>
 #include <iterator>
@@ -89,7 +89,6 @@ SOFTWARE.
 #include <string_view>
 #include <sstream>
 #include <locale>
-#include <type_traits>
 #include <optional>
 #include <memory>
 #include <vector>
@@ -184,8 +183,10 @@ namespace havINI {
 
         inline std::string ToLower(std::string value, const std::locale& loc)
         {
-            auto toLower = std::binder1st(std::mem_fun(&std::ctype<char>::tolower), &std::use_facet<std::ctype<char>>(loc));
-            std::transform(value.begin(), value.end(), value.begin(), toLower);
+            const auto& ctype = std::use_facet<std::ctype<char>>(loc);
+            std::transform(value.begin(), value.end(), value.begin(), [&ctype](char currentChar) {
+                return ctype.tolower(currentChar);
+            });
             return value;
         }
     }

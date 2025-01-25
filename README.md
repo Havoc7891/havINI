@@ -237,6 +237,6 @@ Feel free to suggest features or report issues. However, please note that pull r
 
 ## License
 
-Copyright &copy; 2024 Ren&eacute; Nicolaus
+Copyright &copy; 2024-2025 Ren&eacute; Nicolaus
 
 This library is released under the [MIT license](/LICENSE).
