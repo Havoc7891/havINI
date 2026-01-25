@@ -21,6 +21,7 @@ Havoc's single-file INI library for C++.
   - `\n`
 - Comments can be initiated with a number sign (`#`) or semicolon (`;`)
 - Inline comments after section names and key-value pairs are supported
+- Comment escape mode can be configured (normal or literal)
 - Key-value pairs can be separated by an equal sign (`=`) or colon (`:`)
 - Pretty print support when saving an INI file
 - Whitespaces are removed while parsing the INI file, except in (inline) comments
@@ -28,7 +29,7 @@ Havoc's single-file INI library for C++.
 - Empty lines are supported
 - Empty sections and key-value pairs/arrays without actual values are supported
 - Global arrays, key-value pairs, comments, and empty lines are supported
-- Values with quotes are supported (Double quote (`"`) or single quote (`'`))
+- Values with quotes are supported (double quote (`"`) or single quote (`'`))
 - Support for renaming section names and keys
 - Support for removing sections, key-value pairs, arrays, empty lines, and (inline) comments
 - Support for clearing sections and arrays
@@ -66,8 +67,9 @@ std::locale loc = mIniParser.GetLocale();
 // Set locale
 mIniParser.SetLocale(loc);
 
-// Change default newline, characters and delimiter
+// Change default newline, comment escape mode, characters, and delimiter
 mIniParser.SetNewline("\n");
+mIniParser.SetCommentEscapeMode(havINI::havINICommentEscapeMode::Literal);
 mIniParser.SetCommentCharacter('#');
 mIniParser.SetValueQuoteCharacter('\'');
 mIniParser.SetKeyValuePairDelimiter(':');
@@ -155,6 +157,11 @@ mIniParser.SetComment("Test", "Some comment", havINI::havINIPosition::Start);
 // Add comment below "Test" key-value pair
 mIniParser.SetComment("Test", "Some comment", havINI::havINIPosition::Below, "Test");
 
+// Add comment with literal escaping (\" and \\ are written literally)
+mIniParser.SetCommentEscapeMode(havINI::havINICommentEscapeMode::Literal);
+mIniParser.SetComment("Test", "\" and \\ glyphs", havINI::havINIPosition::Above, "Test");
+mIniParser.SetCommentEscapeMode(havINI::havINICommentEscapeMode::Normal);
+
 // Add inline comment after "Foo" key-value pair
 mIniParser["Test"]["Foo"].SetInlineComment("Setting the bar");
 ```
@@ -233,10 +240,12 @@ if (commentKeyNames.size() > 0)
 
 ## Contributing
 
-Feel free to suggest features or report issues. However, please note that pull requests will not be accepted.
+Thank you for your interest! Suggestions for features and bug reports are always welcome via issues.
+
+To maintain a consistent design and quality for this library, changes are implemented by the maintainer rather than via direct pull requests.
 
 ## License
 
-Copyright &copy; 2024-2025 Ren&eacute; Nicolaus
+Copyright &copy; 2024-2026 Ren&eacute; Nicolaus
 
 This library is released under the [MIT license](/LICENSE).

@@ -13,6 +13,7 @@ TODO
 
 REVISION HISTORY
 
+v0.5 (2026-01-25) - Updated value parsing: quoted values now respect escape sequences (\" and \\) and track the opening quote type so inner apostrophes / quotes don't terminate the string. Added comment escape mode control for literal comment output when needed. Parsing now only trims leading whitespace to preserve spaces inside values. Fixed array key parsing to ignore surrounding whitespace, matching formatted output (e.g., "Key[] = value"). Array operations now validate empty / out-of-range conditions and throw consistent runtime errors.
 v0.4 (2025-01-25) - Fixed the ToLower function by replacing deprecated and removed utility functions with a modern lambda-based implementation. Removed unnecessary header includes to streamline dependencies.
 v0.3 (2024-04-22) - Fixed a small bug which would result into undefined behavior and did some performance optimization.
 v0.2 (2024-01-14) - Exclude havUtils functions from the one definition rule.
@@ -22,7 +23,7 @@ LICENSE
 
 MIT License
 
-Copyright (c) 2024-2025 René Nicolaus
+Copyright (c) 2024-2026 René Nicolaus
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -131,6 +132,12 @@ namespace havINI {
         Below
     };
 
+    enum class havINICommentEscapeMode : std::uint8_t
+    {
+        Normal,
+        Literal
+    };
+
     namespace havUtils
     {
         constexpr bool StartsWith(std::string_view sv, std::string_view prefix)
@@ -184,8 +191,8 @@ namespace havINI {
         inline std::string ToLower(std::string value, const std::locale& loc)
         {
             const auto& ctype = std::use_facet<std::ctype<char>>(loc);
-            std::transform(value.begin(), value.end(), value.begin(), [&ctype](char currentChar) {
-                return ctype.tolower(currentChar);
+            std::transform(value.begin(), value.end(), value.begin(), [&ctype](char currentCharacter) {
+                return ctype.tolower(currentCharacter);
             });
             return value;
         }
@@ -204,7 +211,7 @@ namespace havINI {
 #ifndef HAVINI_CASE_SENSITIVE
             mLocale(loc),
 #endif
-            mType(valueType), mKey(key), mValue(value), mInlineComment(inlineComment), mAddQuotes(addQuotes), mArrayIndex(0), mHasArrayIndex(hasArrayIndex)
+            mType(valueType), mKey(key), mValue(value), mInlineComment(inlineComment), mAddQuotes(addQuotes), mCommentEscapeMode(havINICommentEscapeMode::Normal), mArrayIndex(0), mHasArrayIndex(hasArrayIndex)
             {
             }
 
@@ -216,7 +223,7 @@ namespace havINI {
 #ifndef HAVINI_CASE_SENSITIVE
             mLocale(loc),
 #endif
-            mType(valueType), mKey(key), mValue(""), mInlineComment(std::nullopt), mAddQuotes(addQuotes), mArrayIndex(0), mHasArrayIndex(hasArrayIndex)
+            mType(valueType), mKey(key), mValue(""), mInlineComment(std::nullopt), mAddQuotes(addQuotes), mCommentEscapeMode(havINICommentEscapeMode::Normal), mArrayIndex(0), mHasArrayIndex(hasArrayIndex)
             {
             }
 
@@ -224,7 +231,7 @@ namespace havINI {
 #ifndef HAVINI_CASE_SENSITIVE
             mLocale(value.mLocale),
 #endif
-            mType(value.mType), mKey(value.mKey), mValue(value.mValue), mInlineComment(value.mInlineComment), mAddQuotes(value.mAddQuotes), mArrayIndex(value.mArrayIndex), mHasArrayIndex(value.mHasArrayIndex), mArray(value.mArray)
+            mType(value.mType), mKey(value.mKey), mValue(value.mValue), mInlineComment(value.mInlineComment), mAddQuotes(value.mAddQuotes), mCommentEscapeMode(value.mCommentEscapeMode), mArrayIndex(value.mArrayIndex), mHasArrayIndex(value.mHasArrayIndex), mArray(value.mArray)
             {
             }
 
@@ -232,7 +239,7 @@ namespace havINI {
 #ifndef HAVINI_CASE_SENSITIVE
             mLocale(value.mLocale),
 #endif
-            mType(value.mType), mKey(value.mKey), mValue(value.mValue), mInlineComment(value.mInlineComment), mAddQuotes(value.mAddQuotes), mArrayIndex(value.mArrayIndex), mHasArrayIndex(value.mHasArrayIndex), mArray(value.mArray)
+            mType(value.mType), mKey(value.mKey), mValue(value.mValue), mInlineComment(value.mInlineComment), mAddQuotes(value.mAddQuotes), mCommentEscapeMode(value.mCommentEscapeMode), mArrayIndex(value.mArrayIndex), mHasArrayIndex(value.mHasArrayIndex), mArray(value.mArray)
             {
             }
 
@@ -246,6 +253,7 @@ namespace havINI {
                 mType = value.mType;
                 mInlineComment = value.mInlineComment;
                 mAddQuotes = value.mAddQuotes;
+                mCommentEscapeMode = value.mCommentEscapeMode;
                 mArrayIndex = value.mArrayIndex;
                 mHasArrayIndex = value.mHasArrayIndex;
                 mArray = value.mArray;
@@ -265,6 +273,7 @@ namespace havINI {
                     mType = value.mType;
                     mInlineComment = value.mInlineComment;
                     mAddQuotes = value.mAddQuotes;
+                    mCommentEscapeMode = value.mCommentEscapeMode;
                     mArrayIndex = value.mArrayIndex;
                     mHasArrayIndex = value.mHasArrayIndex;
                     mArray = value.mArray;
@@ -284,6 +293,7 @@ namespace havINI {
                     mType == value.mType &&
                     mInlineComment == value.mInlineComment &&
                     mAddQuotes == value.mAddQuotes &&
+                    mCommentEscapeMode == value.mCommentEscapeMode &&
                     mArrayIndex == value.mArrayIndex &&
                     mHasArrayIndex == value.mHasArrayIndex &&
                     compareVectors(mArray, value.mArray));
@@ -311,7 +321,7 @@ namespace havINI {
                     throw std::runtime_error("Property is not an array!");
                 }
 
-                if (index < 0 || index >= mArray.size())
+                if (index < 0 || static_cast<std::vector<havINIData>::size_type>(index) >= mArray.size())
                 {
                     throw std::out_of_range("Index is out of range!");
                 }
@@ -506,6 +516,11 @@ namespace havINI {
             {
                 if (mType == havINIDataType::Array)
                 {
+                    if (mArray.empty() == true || itr == mArray.end())
+                    {
+                        throw std::runtime_error("Iterator is out of range!");
+                    }
+
                     mArray.erase(itr);
 
                     return;
@@ -563,6 +578,11 @@ namespace havINI {
                         throw std::runtime_error("Data is not of type array!");
                     }
 
+                    if (mArray.empty() == true)
+                    {
+                        throw std::runtime_error("Array is empty!");
+                    }
+
                     return mArray.front();
                 }
                 catch (const std::out_of_range& ex)
@@ -582,6 +602,11 @@ namespace havINI {
                         throw std::runtime_error("Data is not of type array!");
                     }
 
+                    if (mArray.empty() == true)
+                    {
+                        throw std::runtime_error("Array is empty!");
+                    }
+
                     return mArray.back();
                 }
                 catch (const std::out_of_range& ex)
@@ -596,6 +621,11 @@ namespace havINI {
             {
                 if (mType == havINIDataType::Array)
                 {
+                    if (index > mArray.size())
+                    {
+                        throw std::runtime_error("Index is out of range!");
+                    }
+
                     auto itr = mArray.begin();
 
                     mArray.insert(itr + index, newValue);
@@ -636,10 +666,12 @@ namespace havINI {
             {
                 if (mType == havINIDataType::Array)
                 {
-                    if (mArray.empty() == false)
+                    if (mArray.empty() == true)
                     {
-                        mArray.pop_back();
+                        throw std::runtime_error("Array is empty!");
                     }
+
+                    mArray.pop_back();
 
                     return;
                 }
@@ -651,12 +683,14 @@ namespace havINI {
             {
                 if (mType == havINIDataType::Array)
                 {
-                    if (mArray.empty() == false)
+                    if (mArray.empty() == true)
                     {
-                        auto itr = mArray.begin();
-
-                        mArray.erase(itr);
+                        throw std::runtime_error("Array is empty!");
                     }
+
+                    auto itr = mArray.begin();
+
+                    mArray.erase(itr);
 
                     return;
                 }
@@ -668,12 +702,14 @@ namespace havINI {
             {
                 if (mType == havINIDataType::Array)
                 {
-                    if (mArray.empty() == false)
+                    if (mArray.empty() == true || index >= mArray.size())
                     {
-                        auto itr = mArray.begin();
-
-                        mArray.erase(itr + index);
+                        throw std::runtime_error("Index is out of range!");
                     }
+
+                    auto itr = mArray.begin();
+
+                    mArray.erase(itr + index);
 
                     return;
                 }
@@ -759,6 +795,9 @@ namespace havINI {
             bool GetAddQuotes() const { return mAddQuotes; }
             void SetAddQuotes(bool addQuotes) { mAddQuotes = addQuotes; }
 
+            bool IsCommentLiteral() const { return mCommentEscapeMode == havINICommentEscapeMode::Literal; }
+            void SetCommentEscapeMode(havINICommentEscapeMode commentEscapeMode) { mCommentEscapeMode = commentEscapeMode; }
+
             unsigned int GetArrayIndex()
             {
                 unsigned int arrayIndex = 0;
@@ -801,6 +840,7 @@ namespace havINI {
             std::string mValue;
             std::optional<std::string> mInlineComment;
             bool mAddQuotes;
+            havINICommentEscapeMode mCommentEscapeMode;
 
             unsigned int mArrayIndex;
             bool mHasArrayIndex;
@@ -871,7 +911,7 @@ namespace havINI {
 
         havINIData& operator[](int index)
         {
-            if (index < 0 || index >= mKeyValuePairs.size())
+            if (index < 0 || static_cast<std::vector<havINIData>::size_type>(index) >= mKeyValuePairs.size())
             {
                 throw std::out_of_range("Index is out of range!");
             }
@@ -1098,7 +1138,7 @@ namespace havINI {
             return std::distance(mKeyValuePairs.data(), std::addressof(data));
         }
 
-        bool SetComment(std::string key, const std::string& value, const havINIPosition& position, std::optional<std::string> otherKeyName = std::nullopt)
+        bool SetComment(std::string key, const std::string& value, const havINIPosition& position, std::optional<std::string> otherKeyName = std::nullopt, havINICommentEscapeMode commentEscapeMode = havINICommentEscapeMode::Normal)
         {
 #ifndef HAVINI_CASE_SENSITIVE
             key = havUtils::ToLower(key, mLocale);
@@ -1118,6 +1158,7 @@ namespace havINI {
 #else
                 havINIData newComment(mLocale, key, value, havINIDataType::Comment);
 #endif
+                newComment.SetCommentEscapeMode(commentEscapeMode);
 
                 std::ptrdiff_t index = 0;
 
@@ -1351,7 +1392,7 @@ namespace havINI {
 
         havINISection& operator[](int index)
         {
-            if (index < 0 || index >= mData.size())
+            if (index < 0 || static_cast<std::vector<havINISection>::size_type>(index) >= mData.size())
             {
                 throw std::out_of_range("Index is out of range!");
             }
@@ -1592,6 +1633,31 @@ namespace havINI {
             return resultValue;
         }
 
+        std::string ConvertToEscapedStringForCommentLiteral(const std::string& value)
+        {
+            std::string escapedValue = ConvertToEscapedString(value);
+            std::string resultValue;
+            resultValue.reserve(escapedValue.size());
+
+            for (std::string::size_type index = 0; index < escapedValue.size(); ++index)
+            {
+                if (escapedValue[index] == '\\' && index + 1 < escapedValue.size())
+                {
+                    char nextCharacter = escapedValue[index + 1];
+                    if (nextCharacter == '"' || nextCharacter == '\\')
+                    {
+                        resultValue += nextCharacter;
+                        ++index;
+                        continue;
+                    }
+                }
+
+                resultValue += escapedValue[index];
+            }
+
+            return resultValue;
+        }
+
         bool ParseFile(const std::string& fileName)
         {
 #ifdef _WIN32
@@ -1626,7 +1692,7 @@ namespace havINI {
                 return false;
             }
 
-            unsigned char unsignedCurrentChar;
+            unsigned char unsignedCurrentCharacter;
 
             // Check for BOM (Byte order mark)
             unsigned char bomArray[4] = { '\0' };
@@ -1634,9 +1700,9 @@ namespace havINI {
             // Read the first four bytes of the file
             for (int index = 0; index < 4; ++index)
             {
-                std::fread(&unsignedCurrentChar, sizeof(unsigned char), 1, fileStream.get());
+                std::fread(&unsignedCurrentCharacter, sizeof(unsigned char), 1, fileStream.get());
 
-                bomArray[index] = unsignedCurrentChar;
+                bomArray[index] = unsignedCurrentCharacter;
             }
 
             int bytesToSkip = 0;
@@ -1740,8 +1806,8 @@ namespace havINI {
             if (bomType == havINIBOMType::None ||
                 bomType == havINIBOMType::UTF8)
             {
-                char currentChar;
-                while (std::fread(&currentChar, sizeof(char), 1, fileStream.get()) > 0)
+                char currentCharacter;
+                while (std::fread(&currentCharacter, sizeof(char), 1, fileStream.get()) > 0)
                 {
                     if (bytesToSkip > 0)
                     {
@@ -1751,14 +1817,14 @@ namespace havINI {
                             continue;
                         }
                     }
-                    fileContents += currentChar;
+                    fileContents += currentCharacter;
                 }
             }
             else if (bomType == havINIBOMType::UTF16LE ||
                      bomType == havINIBOMType::UTF16BE)
             {
-                char16_t currentCharU16;
-                while (std::fread(&currentCharU16, sizeof(char16_t), 1, fileStream.get()) > 0)
+                char16_t currentCharacterU16;
+                while (std::fread(&currentCharacterU16, sizeof(char16_t), 1, fileStream.get()) > 0)
                 {
                     if (bytesToSkip > 0)
                     {
@@ -1768,14 +1834,14 @@ namespace havINI {
                             continue;
                         }
                     }
-                    fileContentsU16 += currentCharU16;
+                    fileContentsU16 += currentCharacterU16;
                 }
             }
             else if (bomType == havINIBOMType::UTF32LE ||
                      bomType == havINIBOMType::UTF32BE)
             {
-                char32_t currentCharU32;
-                while (std::fread(&currentCharU32, sizeof(char32_t), 1, fileStream.get()) > 0)
+                char32_t currentCharacterU32;
+                while (std::fread(&currentCharacterU32, sizeof(char32_t), 1, fileStream.get()) > 0)
                 {
                     if (bytesToSkip > 0)
                     {
@@ -1785,7 +1851,7 @@ namespace havINI {
                             continue;
                         }
                     }
-                    fileContentsU32 += currentCharU32;
+                    fileContentsU32 += currentCharacterU32;
                 }
             }
 
@@ -1797,9 +1863,9 @@ namespace havINI {
             else if (bomType == havINIBOMType::UTF16BE)
             {
                 std::u16string u16ConvBE;
-                for (char16_t currentChar : fileContentsU16)
+                for (char16_t currentCharacter : fileContentsU16)
                 {
-                    u16ConvBE += (((currentChar & 0x00ff) << 8) | ((currentChar & 0xff00) >> 8));
+                    u16ConvBE += (((currentCharacter & 0x00ff) << 8) | ((currentCharacter & 0xff00) >> 8));
                 }
                 fileContents = std::wstring_convert<havINICodeCvt<char16_t, char, std::mbstate_t>, char16_t>{}.to_bytes(u16ConvBE);
             }
@@ -1810,12 +1876,12 @@ namespace havINI {
             else if (bomType == havINIBOMType::UTF32BE)
             {
                 std::u32string u32ConvBE;
-                for (char32_t currentChar : fileContentsU32)
+                for (char32_t currentCharacter : fileContentsU32)
                 {
-                    u32ConvBE += (((currentChar & 0x000000ff) << 24) |
-                                  ((currentChar & 0x0000ff00) << 8) |
-                                  ((currentChar & 0x00ff0000) >> 8) |
-                                  ((currentChar & 0xff000000) >> 24));
+                    u32ConvBE += (((currentCharacter & 0x000000ff) << 24) |
+                                  ((currentCharacter & 0x0000ff00) << 8) |
+                                  ((currentCharacter & 0x00ff0000) >> 8) |
+                                  ((currentCharacter & 0xff000000) >> 24));
                 }
                 fileContents = std::wstring_convert<havINICodeCvt<char32_t, char, std::mbstate_t>, char32_t>{}.to_bytes(u32ConvBE);
             }
@@ -1827,9 +1893,9 @@ namespace havINI {
             // Read INI file contents
             for (std::string::size_type index = 0; index < fileContents.size(); ++index)
             {
-                char currentChar = fileContents[index];
+                char currentCharacter = fileContents[index];
 
-                int extractedCharacter = currentChar;
+                int extractedCharacter = currentCharacter;
 
                 switch (extractedCharacter)
                 {
@@ -1840,12 +1906,12 @@ namespace havINI {
                             break;
                         }
 
-                        currentChar = fileContents[index + 1];
+                        currentCharacter = fileContents[index + 1];
 
                         // CRLF found!
-                        if (currentChar == '\n')
+                        if (currentCharacter == '\n')
                         {
-                            extractedCharacter = currentChar;
+                            extractedCharacter = currentCharacter;
 
                             line += static_cast<char>(extractedCharacter);
                             buffer.push_back(line);
@@ -1875,9 +1941,9 @@ namespace havINI {
                             break;
                         }
 
-                        currentChar = fileContents[index];
+                        currentCharacter = fileContents[index];
 
-                        switch (currentChar)
+                        switch (currentCharacter)
                         {
                         case 'x':
                             {
@@ -1894,9 +1960,9 @@ namespace havINI {
                                         throw std::runtime_error("Read beyond end of file, and found invalid unicode escape sequence!");
                                     }
 
-                                    char currentCharInLoop = fileContents[index];
+                                    char currentCharacterInLoop = fileContents[index];
 
-                                    if (std::isxdigit(currentCharInLoop, loc) == false)
+                                    if (std::isxdigit(currentCharacterInLoop, loc) == false)
                                     {
                                         isUnicodeEscapeSequence = false;
 
@@ -1907,7 +1973,7 @@ namespace havINI {
                                         isUnicodeEscapeSequence = true;
                                     }
 
-                                    hexString += currentCharInLoop;
+                                    hexString += currentCharacterInLoop;
                                 }
 
                                 if (isUnicodeEscapeSequence == true)
@@ -1941,9 +2007,9 @@ namespace havINI {
                                                     throw std::runtime_error("Read beyond end of file, and found invalid unicode escape sequence!");
                                                 }
 
-                                                char currentCharInLoop = fileContents[index];
+                                                char currentCharacterInLoop = fileContents[index];
 
-                                                if (std::isxdigit(currentCharInLoop, loc) == false)
+                                                if (std::isxdigit(currentCharacterInLoop, loc) == false)
                                                 {
                                                     surrogatePair = false;
 
@@ -1954,7 +2020,7 @@ namespace havINI {
                                                     surrogatePair = true;
                                                 }
 
-                                                hexString += currentCharInLoop;
+                                                hexString += currentCharacterInLoop;
                                             }
 
                                             if (surrogatePair == true)
@@ -2010,7 +2076,7 @@ namespace havINI {
                                     --index;
 
                                     // Don't eat the x character
-                                    line += currentChar;
+                                    line += currentCharacter;
 
                                     if (hexString.empty() == false)
                                     {
@@ -2021,7 +2087,9 @@ namespace havINI {
                             break;
 
                         default:
-                            throw std::runtime_error("Invalid escape character!");
+                            // Preserve unknown escape sequences for later parsing
+                            line += '\\';
+                            line += currentCharacter;
                             break;
                         }
                     }
@@ -2078,36 +2146,22 @@ namespace havINI {
 
                 line = buffer[lineIndex];
 
-                // Remove whitespaces
+                // Only trim leading whitespace to preserve spaces inside values
                 std::size_t characterIndex = 0;
 
-                std::string tmpLine = "";
+                std::string tmpLine = line;
 
-                bool commentSection = false;
-                bool valueSection = false;
-
-                for (std::size_t cIndex = 0; cIndex < line.size(); ++cIndex)
+                if (!tmpLine.empty())
                 {
-                    if (line[cIndex] == ';' || line[cIndex] == '#')
-                    {
-                        commentSection = true;
-                    }
+                    const std::size_t firstNonSpace = tmpLine.find_first_not_of(" \t\r\n");
 
-                    if (line[cIndex] == '\"' || line[cIndex] == '\'')
+                    if (firstNonSpace == std::string::npos)
                     {
-                        valueSection = !valueSection;
+                        tmpLine.clear();
                     }
-
-                    if (commentSection == false && valueSection == false)
+                    else if (firstNonSpace > 0)
                     {
-                        if (std::isspace(line[cIndex], mLocale) == false)
-                        {
-                            tmpLine += line[cIndex];
-                        }
-                    }
-                    else
-                    {
-                        tmpLine += line[cIndex];
+                        tmpLine.erase(0, firstNonSpace);
                     }
                 }
 
@@ -2354,16 +2408,32 @@ namespace havINI {
                         std::string delimiter{ endCharacter };
                         std::string fullKey(havUtils::Split(line, delimiter)[0]);
 
+                        // Trim whitespace around key name before array parsing
+                        auto trimWhitespace = [](std::string_view text) {
+                            while (!text.empty() && (text.front() == ' ' || text.front() == '\t'))
+                            {
+                                text.remove_prefix(1);
+                            }
+                            while (!text.empty() && (text.back() == ' ' || text.back() == '\t'))
+                            {
+                                text.remove_suffix(1);
+                            }
+                            return text;
+                        };
+
+                        std::string_view trimmedKeyView = trimWhitespace(fullKey);
+                        std::string trimmedKey(trimmedKeyView);
+
                         isArrayKey = false;
                         hasArrayIndex = false;
 
-                        if (havUtils::EndsWith(fullKey, "[]") == true)
+                        if (havUtils::EndsWith(trimmedKey, "[]") == true)
                         {
                             isArrayKey = true;
                         }
-                        else if (havUtils::StartsWith(fullKey, "[") == false && havUtils::EndsWith(fullKey, "]") == true && fullKey.find("[") != std::string::npos)
+                        else if (havUtils::StartsWith(trimmedKey, "[") == false && havUtils::EndsWith(trimmedKey, "]") == true && trimmedKey.find("[") != std::string::npos)
                         {
-                            arrayIndex = havUtils::Split(fullKey, "[")[1];
+                            arrayIndex = havUtils::Split(trimmedKey, "[")[1];
                             arrayIndex.pop_back(); // Remove "]" character
 
                             isArrayKey = true;
@@ -2479,23 +2549,16 @@ namespace havINI {
                         }
                     }
 
-                    std::size_t quoteCharacterPos = 0;
-                    std::size_t allQuoteCharacters = 0;
-
-                    while ((quoteCharacterPos = line.find("\"", quoteCharacterPos + 1)) != std::string::npos &&
-                           (quoteCharacterPos = line.find("\'", quoteCharacterPos + 1)) != std::string::npos)
-                    {
-                        ++allQuoteCharacters;
-                    }
-
                     if (errorMessage.empty() == true)
                     {
-                        std::size_t currentQuoteCharacter = 0;
-
                         bool addQuotes = false;
+
+                        char quoteCharacter = '\0';
 
                         while (line[characterIndex] != '\n')
                         {
+                            const char currentCharacter = line[characterIndex];
+
                             if (line[characterIndex] == ' ' && stringValue == false)
                             {
                                 ++characterIndex;
@@ -2520,51 +2583,36 @@ namespace havINI {
                                 break;
                             }
 
-                            if (allQuoteCharacters > 2)
+                            if (stringValue == true && currentCharacter == '\\')
                             {
-                                if ((line[characterIndex] == '\"' || line[characterIndex] == '\'') && stringValue == false && currentQuoteCharacter == 0)
+                                char nextCharacter = line[characterIndex + 1];
+                                if (nextCharacter != '\n' &&
+                                    (nextCharacter == quoteCharacter || nextCharacter == '\\'))
                                 {
-                                    stringValue = true;
-
-                                    ++characterIndex;
-
-                                    ++currentQuoteCharacter;
-
-                                    continue;
-                                }
-
-                                if ((line[characterIndex] == '\"' || line[characterIndex] == '\'') && stringValue == true && currentQuoteCharacter < allQuoteCharacters)
-                                {
-                                    ++currentQuoteCharacter;
-                                }
-
-                                if ((line[characterIndex] == '\"' || line[characterIndex] == '\'') && stringValue == true && currentQuoteCharacter == allQuoteCharacters)
-                                {
-                                    stringValue = false;
-
-                                    ++currentQuoteCharacter;
-
-                                    ++characterIndex;
-
-                                    addQuotes = true;
-
+                                    value += nextCharacter;
+                                    characterIndex += 2;
                                     continue;
                                 }
                             }
-                            else
+
+                            if (currentCharacter == '\"' || currentCharacter == '\'')
                             {
-                                if ((line[characterIndex] == '\"' || line[characterIndex] == '\'') && stringValue == false)
+                                if (stringValue == false)
                                 {
                                     stringValue = true;
+
+                                    quoteCharacter = currentCharacter;
 
                                     ++characterIndex;
 
                                     continue;
                                 }
 
-                                if ((line[characterIndex] == '\"' || line[characterIndex] == '\'') && stringValue == true)
+                                if (stringValue == true && currentCharacter == quoteCharacter)
                                 {
                                     stringValue = false;
+
+                                    quoteCharacter = '\0';
 
                                     ++characterIndex;
 
@@ -2848,7 +2896,14 @@ namespace havINI {
                         keyValuePair = newline;
                         keyValuePair += GetCommentCharacter();
                         keyValuePair += " ";
-                        keyValuePair += ConvertToEscapedString((*keyValuePairIterator).GetValue());
+                        if ((*keyValuePairIterator).IsCommentLiteral() == true)
+                        {
+                            keyValuePair += ConvertToEscapedStringForCommentLiteral((*keyValuePairIterator).GetValue());
+                        }
+                        else
+                        {
+                            keyValuePair += ConvertToEscapedString((*keyValuePairIterator).GetValue());
+                        }
                     }
                     else if ((*keyValuePairIterator).GetType() == havINIDataType::Array)
                     {
@@ -3174,7 +3229,7 @@ namespace havINI {
                 std::string commentKeyStart = "hi_c_";
 #endif
 
-                sectionEntry->SetComment(commentKeyStart + std::to_string(sectionEntry->GetCommentLineCount()), comment, position, keyName);
+                sectionEntry->SetComment(commentKeyStart + std::to_string(sectionEntry->GetCommentLineCount()), comment, position, keyName, mCommentEscapeMode);
 
                 return true;
             }
@@ -3456,6 +3511,11 @@ namespace havINI {
             mCommentCharacter = commentCharacter;
         }
 
+        void SetCommentEscapeMode(havINICommentEscapeMode commentEscapeMode)
+        {
+            mCommentEscapeMode = commentEscapeMode;
+        }
+
         void SetValueQuoteCharacter(char valueQuoteCharacter)
         {
             if (valueQuoteCharacter != '\"' && valueQuoteCharacter != '\'')
@@ -3483,6 +3543,7 @@ namespace havINI {
 
         const std::string& GetNewline() const { return mNewline; }
         char GetCommentCharacter() const { return mCommentCharacter; }
+        havINICommentEscapeMode GetCommentEscapeMode() const { return mCommentEscapeMode; }
         char GetValueQuoteCharacter() const { return mValueQuoteCharacter; }
         char GetKeyValuePairDelimiter() const { return mKeyValuePairDelimiter; }
         std::locale GetLocale() const { return mLocale; }
@@ -3536,9 +3597,9 @@ namespace havINI {
             {
                 std::u16string u16Conv = std::wstring_convert<havINICodeCvt<char16_t, char, std::mbstate_t>, char16_t>{}.from_bytes(value);
                 std::u16string u16ConvBE;
-                for (char16_t currentChar : u16Conv)
+                for (char16_t currentCharacter : u16Conv)
                 {
-                    u16ConvBE += (((currentChar & 0x00ff) << 8) | ((currentChar & 0xff00) >> 8));
+                    u16ConvBE += (((currentCharacter & 0x00ff) << 8) | ((currentCharacter & 0xff00) >> 8));
                 }
                 std::fwrite(u16ConvBE.data(), sizeof(char16_t), u16ConvBE.size(), fileStream);
             }
@@ -3551,19 +3612,20 @@ namespace havINI {
             {
                 std::u32string u32Conv = std::wstring_convert<havINICodeCvt<char32_t, char, std::mbstate_t>, char32_t>{}.from_bytes(value);
                 std::u32string u32ConvBE;
-                for (char32_t currentChar : u32Conv)
+                for (char32_t currentCharacter : u32Conv)
                 {
-                    u32ConvBE += (((currentChar & 0x000000ff) << 24) |
-                                  ((currentChar & 0x0000ff00) << 8) |
-                                  ((currentChar & 0x00ff0000) >> 8) |
-                                  ((currentChar & 0xff000000) >> 24));
+                    u32ConvBE += (((currentCharacter & 0x000000ff) << 24) |
+                                  ((currentCharacter & 0x0000ff00) << 8) |
+                                  ((currentCharacter & 0x00ff0000) >> 8) |
+                                  ((currentCharacter & 0xff000000) >> 24));
                 }
                 std::fwrite(u32ConvBE.data(), sizeof(char32_t), u32ConvBE.size(), fileStream);
             }
         }
 
-        // Default INI newline, characters and delimiter
+        // Default INI newline, comment escape mode, characters, and delimiter
         std::string mNewline = "\r\n";
+        havINICommentEscapeMode mCommentEscapeMode = havINICommentEscapeMode::Normal;
         char mCommentCharacter = ';';
         char mValueQuoteCharacter = '\"';
         char mKeyValuePairDelimiter = '=';
