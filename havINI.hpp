@@ -13,6 +13,7 @@ TODO
 
 REVISION HISTORY
 
+v0.6 (2026-02-08) - Fixed quoted-value parsing for bracket characters: '[' and ']' are now treated as normal value content when inside a quoted string (e.g., `Key = "["`) instead of being misinterpreted as section delimiters.
 v0.5 (2026-01-25) - Updated value parsing: quoted values now respect escape sequences (\" and \\) and track the opening quote type so inner apostrophes / quotes don't terminate the string. Added comment escape mode control for literal comment output when needed. Parsing now only trims leading whitespace to preserve spaces inside values. Fixed array key parsing to ignore surrounding whitespace, matching formatted output (e.g., "Key[] = value"). Array operations now validate empty / out-of-range conditions and throw consistent runtime errors.
 v0.4 (2025-01-25) - Fixed the ToLower function by replacing deprecated and removed utility functions with a modern lambda-based implementation. Removed unnecessary header includes to streamline dependencies.
 v0.3 (2024-04-22) - Fixed a small bug which would result into undefined behavior and did some performance optimization.
@@ -2571,13 +2572,13 @@ namespace havINI {
                                 continue;
                             }
 
-                            if (line[characterIndex] == '[')
+                            if (line[characterIndex] == '[' && stringValue == false)
                             {
                                 errorMessage += "Start section tag within value tag!\n";
                                 break;
                             }
 
-                            if (line[characterIndex] == ']')
+                            if (line[characterIndex] == ']' && stringValue == false)
                             {
                                 errorMessage += "Close section tag within value tag!\n";
                                 break;
