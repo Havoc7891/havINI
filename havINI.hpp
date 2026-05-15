@@ -13,6 +13,7 @@ TODO
 
 REVISION HISTORY
 
+v0.7 (2026-05-15) - Fixed indexed arrays to preserve explicit indexes when writing an INI file. Added error handling for the file size check while parsing an INI file. Simplified platform type size checks.
 v0.6 (2026-02-08) - Fixed quoted-value parsing for bracket characters: '[' and ']' are now treated as normal value content when inside a quoted string (e.g., `Key = "["`) instead of being misinterpreted as section delimiters.
 v0.5 (2026-01-25) - Updated value parsing: quoted values now respect escape sequences (\" and \\) and track the opening quote type so inner apostrophes / quotes don't terminate the string. Added comment escape mode control for literal comment output when needed. Parsing now only trims leading whitespace to preserve spaces inside values. Fixed array key parsing to ignore surrounding whitespace, matching formatted output (e.g., "Key[] = value"). Array operations now validate empty / out-of-range conditions and throw consistent runtime errors.
 v0.4 (2025-01-25) - Fixed the ToLower function by replacing deprecated and removed utility functions with a modern lambda-based implementation. Removed unnecessary header includes to streamline dependencies.
@@ -81,6 +82,7 @@ SOFTWARE.
 #include <algorithm>
 #include <cstdio>
 #include <cstdint>
+#include <climits>
 #include <cuchar>
 #include <cstring>
 #include <iostream>
@@ -95,16 +97,7 @@ SOFTWARE.
 #include <memory>
 #include <vector>
 
-static_assert(sizeof(signed char) == 1, "expected char to be 1 byte");
-static_assert(sizeof(unsigned char) == 1, "expected unsigned char to be 1 byte");
-static_assert(sizeof(signed char) == 1, "expected int8 to be 1 byte");
-static_assert(sizeof(unsigned char) == 1, "expected uint8 to be 1 byte");
-static_assert(sizeof(signed short int) == 2, "expected int16 to be 2 bytes");
-static_assert(sizeof(unsigned short int) == 2, "expected uint16 to be 2 bytes");
-static_assert(sizeof(signed int) == 4, "expected int32 to be 4 bytes");
-static_assert(sizeof(unsigned int) == 4, "expected uint32 to be 4 bytes");
-static_assert(sizeof(signed long long) == 8, "expected int64 to be 8 bytes");
-static_assert(sizeof(unsigned long long) == 8, "expected uint64 to be 8 bytes");
+static_assert(CHAR_BIT == 8, "havINI requires 8-bit bytes");
 
 namespace havINI {
     enum class havINIBOMType : std::uint8_t
@@ -1116,9 +1109,9 @@ namespace havINI {
             else
             {
 #ifdef HAVINI_CASE_SENSITIVE
-                mKeyValuePairs.emplace_back(key, havINIDataType::Array, hasArrayIndex);
+                mKeyValuePairs.emplace_back(key, havINIDataType::Array, false, hasArrayIndex);
 #else
-                mKeyValuePairs.emplace_back(mLocale, key, havINIDataType::Array, hasArrayIndex);
+                mKeyValuePairs.emplace_back(mLocale, key, havINIDataType::Array, false, hasArrayIndex);
 #endif
 
                 auto foundNewKeyValuePair = std::find_if(mKeyValuePairs.begin(), mKeyValuePairs.end(), [&](const havINIData& data) { return data.GetKey() == key; } );
@@ -1675,9 +1668,28 @@ namespace havINI {
             }
 
             // Get file size
-            std::fseek(fileStream.get(), 0, SEEK_END);
+            if (std::fseek(fileStream.get(), 0, SEEK_END) != 0)
+            {
+                std::cout << "Unable to seek INI file: " << fileName << "\n";
+
+                return false;
+            }
+
             long fileSize = std::ftell(fileStream.get());
-            std::fseek(fileStream.get(), 0, SEEK_SET);
+
+            if (fileSize == -1L)
+            {
+                std::cout << "Unable to determine INI file size: " << fileName << "\n";
+
+                return false;
+            }
+
+            if (std::fseek(fileStream.get(), 0, SEEK_SET) != 0)
+            {
+                std::cout << "Unable to rewind INI file: " << fileName << "\n";
+
+                return false;
+            }
 
             if (fileSize == 0)
             {
@@ -1798,7 +1810,12 @@ namespace havINI {
                 std::cout << "INI file starts with " << bomTypeString << " BOM! Please note that by default the BOM will be skipped, and removed in case the INI file gets saved and the BOM was not specified!\n";
             }
 
-            std::fseek(fileStream.get(), 0, SEEK_SET);
+            if (std::fseek(fileStream.get(), 0, SEEK_SET) != 0)
+            {
+                std::cout << "Unable to rewind INI file after BOM detection: " << fileName << "\n";
+
+                return false;
+            }
 
             std::string fileContents;
             std::u16string fileContentsU16;
